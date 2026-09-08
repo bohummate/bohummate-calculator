@@ -188,6 +188,7 @@ body{padding-bottom:84px}
 .entry-h{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#F6EFE7;border-bottom:1px solid var(--line-2);flex-wrap:wrap}
 .entry-h .no{font-weight:700;color:var(--ink-2);width:28px}
 .entry-h select,.entry-h input{border:1px solid var(--line);border-radius:4px;padding:8px 10px;background:var(--input);font-size:.95rem}
+.entry-h input[data-k=date]{font-variant-numeric:tabular-nums;letter-spacing:.02em}
 .entry-h .del{margin-left:auto;background:none;border:0;color:var(--ink-3);cursor:pointer;font-size:.85rem}
 .entry-h .del:hover{color:var(--bad)}
 .fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 16px;padding:16px}
@@ -721,7 +722,7 @@ function renderEntries(){
     el.innerHTML=`
       <div class="entry-h">
         <span class="no">${i+1}</span>
-        <input type="date" data-k="date" value="${r.date}" aria-label="진료일">
+        <input type="text" inputmode="numeric" data-k="date" value="${r.date}" placeholder="진료일 20260908" maxlength="10" style="width:150px" aria-label="진료일">
         <select data-k="kind" aria-label="구분"><option ${r.kind==="통원"?"selected":""}>통원</option><option ${r.kind==="입원"?"selected":""}>입원</option></select>
         <select data-k="org" aria-label="의료기관">${ORG.map(o=>`<option ${r.org===o?"selected":""}>${o}</option>`).join("")}</select>
         ${gen==="g5"?`<select data-k="sev" aria-label="환자구분"><option ${r.sev==="일반"?"selected":""}>일반</option><option ${r.sev==="중증"?"selected":""}>중증</option></select>`:""}
@@ -825,12 +826,22 @@ function renderAll(){ renderEntries(); renderReceipt(); renderSettings(); render
 
 /* ---------- 이벤트 ---------- */
 document.addEventListener("focusout", e=>{
-  const t=e.target; if(!t.dataset||!t.dataset.k||!"grxmgnmaninjmriroomex".includes(t.dataset.k)||t.type!=="text") return;
+  const t=e.target;
+  if(t.dataset&&t.dataset.k==="date"&&t.value){ const ok=/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(t.value); t.style.borderColor=ok?"":"var(--bad)"; t.title=ok?"":"날짜는 20260908 형식으로 8자리 입력"; }
+  if(!t.dataset||!t.dataset.k||!"grxmgnmaninjmriroomex".includes(t.dataset.k)||t.type!=="text") return;
   const k=t.dataset.k; if(!["g","rx","mg","n","man","inj","mri","room","ex"].includes(k)) return;
   const v=num(t.value); t.value=v?v.toLocaleString("ko-KR"):"";
 },true);
+function fmtDateInput(v){
+  let d=v.replace(/[^0-9]/g,"").slice(0,8);
+  if(d.length===6 && !/^(19|20)/.test(d)) d="20"+d;           // 260908 → 20260908
+  if(d.length<=4) return d;
+  if(d.length<=6) return d.slice(0,4)+"-"+d.slice(4);
+  return d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6);
+}
 document.addEventListener("input", e=>{
   const t=e.target, gen=state.gen;
+  if (t.dataset.k==="date"){ const pos=t.selectionStart, before=t.value.length; t.value=fmtDateInput(t.value); const after=t.value.length; try{ t.setSelectionRange(pos+(after-before),pos+(after-before)); }catch(x){} }
   if (t.dataset.k){
     const row=state.rows[gen].find(r=>r.id===t.closest(".entry").dataset.id); row[t.dataset.k]=t.value;
     if (t.tagName==="SELECT"){ renderEntries(); } else { updateRowResult(row); }
@@ -870,13 +881,22 @@ document.addEventListener("click", e=>{
     const L=["[실손보험금 예상 안내]","","고객님, 보내주신 서류들 기준으로 예상 지급액을 계산해 드립니다.",""];
     rows.forEach((r,i)=>{ const x=res[i]; if(!x.paid) return;
       L.push(`■ ${fd(r.date)?fd(r.date)+" ":""}${r.kind==="입원"?"입원":"통원"} (${r.org}${r.kind==="입원"&&r.days?", "+r.days+"일":""}${gen==="g5"&&r.sev==="중증"?", 중증":""})`);
-      L.push(`  · 예상 지급액: 약 ${won(x.total)}`);
-      L.push(`  · 본인 부담(공제): ${won(x.self)}`);
-      const notes=x.memo.map(friendly).filter(Boolean); notes.forEach(n=>L.push(`  - ${n}`)); L.push(""); });
-    const gr=gen==="g5"?"":`  - 급여 항목은 ${pct(S.gRateIn)}, 비급여 항목은 ${pct(S.nRate)}를 본인이 부담하는 ${DEF[gen].title} 기준입니다`;
-    L.push(`▶ 예상 지급 총액: 약 ${won(total)}`); if(gr) L.push(gr); L.push("");
+      L.push("");
+      L.push("① 병원에 내신 금액");
+      const paidParts=[["급여 본인부담",num(r.g)],["약국(처방조제)",num(r.rx)],["관리급여",num(r.mg)],["일반 비급여",num(r.n)],["도수·체외충격파·증식",num(r.man)],["비급여 주사료",num(r.inj)],["MRI·MRA",num(r.mri)],["상급병실료 차액",num(r.room)]].filter(q=>q[1]>0);
+      paidParts.forEach(q=>L.push(`  · ${q[0]}: ${won(q[1])}`));
+      if(num(r.ex)>0) L.push(`  · 보상 제외 항목(제증명·영양제·편의용품 등): ${won(num(r.ex))}`);
+      L.push(`  = 합계 ${won(x.paid+num(r.ex))}`);
+      L.push("");
+      L.push("② 예상 지급액");
+      const payParts=[["급여",x.pg],["관리급여",x.pm],["일반 비급여",x.pn],["도수·체외충격파·증식",x.pman],["비급여 주사료",x.pinj],["MRI·MRA",x.pmri],["상급병실료",x.proom]].filter(q=>q[1]>0);
+      payParts.forEach(q=>L.push(`  · ${q[0]}: ${won(q[1])}`));
+      L.push(`  = 합계 약 ${won(x.total)}  (자기부담 ${won(x.self+num(r.ex))})`);
+      const notes=x.memo.map(friendly).filter(Boolean); notes.forEach(n=>L.push(`  ※ ${n}`)); L.push(""); });
+    const paidAll=res.reduce((a,x,i)=>a+x.paid+num(rows[i].ex),0);
+    L.push(`▶ 병원비 총 ${won(paidAll)} 중 예상 지급 총액: 약 ${won(total)}`);
+    const gr=gen==="g5"?"":`  (급여 ${pct(S.gRateIn)}, 비급여 ${pct(S.nRate)} 자기부담 — ${DEF[gen].title} 기준)`; if(gr) L.push(gr); L.push("");
     L.push("※ 위 금액은 약관 기준 예상치이며, 최종 지급액은 보험사 심사 결과에 따라 달라질 수 있습니다.");
-    L.push("※ 진단서·확인서 발급비, 비타민·영양제 주사, 밴드류, 보호자 편의용품 등은 실손에서 보상되지 않아 제외했습니다.");
     L.push("","","보험메이트 드림");
     const text=L.join("\n");
     const done=()=>{ t.textContent="✅ 복사되었습니다"; setTimeout(()=>t.textContent="📋 결과 복사 (고객 안내용 텍스트)",1800); };
